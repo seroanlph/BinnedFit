@@ -4,6 +4,7 @@ import numpy as np
 import inspect
 import sys
 from os import system
+from scipy.stats import kstest
 
 
 class UnbinnedLLH():
@@ -22,17 +23,22 @@ class UnbinnedLLH():
                 zip(inspect.getfullargspec(self.model).args[1:], start))
 
     def likelihood(self, *params):
-        return -2*np.log(self.model(self.x, *params)).sum()
+        return -2 * np.log(self.model(self.x, *params)).sum()
 
     def run(self, verbose=True):
         """
         Run the fit, returns the minimized minimizer which stores the minimum and
         the values.
         """
-        m = imin.Minuit(self.likelihood, **self.par0, name=self.par0.keys())
-        m.migrad()
-        m.hesse()
-        return m
+        self.m = imin.Minuit(self.likelihood, **self.par0,
+                             name=self.par0.keys())
+        self.m.migrad()
+        self.m.hesse()
+        return self.m
+
+    def goodness_of_fit(self):
+        ks_ts, p = kstest(self.x, self.model, args=self.m.values)
+        return(p)
 
 
 class LLHFit(UnbinnedLLH):
@@ -84,6 +90,14 @@ class LLHFit(UnbinnedLLH):
         Implement your own, if there is no fitting implementation
         """
         pass
+
+    def goodness_of_fit(self):
+        n_meas = self.n_meas
+        self.asimov = self.model(self.x, self.m.values)
+        self.n_meas = self.asimov
+        asimov_likelihood = self.likelihood(self.m.values)
+        self.n_meas = n_meas
+        return 2*(asimov_likelihood-self.m.fval)
 
 
 class ChiSquare(LLHFit):
