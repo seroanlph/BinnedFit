@@ -6,12 +6,15 @@ import sys
 from os import system
 
 
-class LLHFit():
-    def __init__(self, model, x, n_meas, start):
-        self.x = x
+class UnbinnedLLH():
+    def __init__(self, model, x, start):
+        if np.ma.isMaskedArray(x):
+            self.x = x.compressed()
+        elif type(x) == list:
+            self.x = np.array(x)
+        else:
+            self.x = x
         self.model = model
-        self.n_meas = n_meas
-
         if type(start) == dict:
             self.par0 = start
         else:
@@ -19,13 +22,68 @@ class LLHFit():
                 zip(inspect.getfullargspec(self.model).args[1:], start))
 
     def likelihood(self, *params):
-        pass
+        return -2*np.log(self.model(self.x, *params)).sum()
 
     def run(self, verbose=True):
+        """
+        Run the fit, returns the minimized minimizer which stores the minimum and
+        the values.
+        """
         m = imin.Minuit(self.likelihood, **self.par0, name=self.par0.keys())
         m.migrad()
         m.hesse()
         return m
+
+
+class LLHFit(UnbinnedLLH):
+    """
+    General Template for binned likelihood fitting.
+    Use it only if you have to implement your own edge case -
+    Otherwise GeneralLLHFit is probably what your looking for.
+    """
+
+    def __init__(self, model, x, n_meas, start):
+        """
+        Read in Model and Data to fit.
+
+        -----------
+        parameters:
+
+        model: function
+        Model that predicts n_meas. Should take the data as an numpy array
+        as first argument and arbitrary *params after that.
+        x: numpy array
+        The data used to create a prediction which is then compared to n_meas
+        n_meas: numpy array with dtype int
+        number of entries in the histogram, which is used to fit.
+        start: array or dict:
+        Initial guess on the parameters to fit. If an array is provided,
+        the names of the parameters are tried to be inferred from the model.
+        Otherwise a dictionary can be used to provide names for the parameter.
+
+        """
+        if np.ma.isMaskedArray(x) and np.ma.isMaskedArray(n_meas):
+            or_mask = np.ma.mask_or(n_meas.mask, x.mask)
+            self.n_meas = np.ma.masked_where(or_mask, n_meas)
+            UnbinnedLLH.__init__(
+                self, model, np.ma.masked_where(or_mask, x), start)
+        elif np.ma.isMaskedArray(n_meas):
+            self.n_meas = n_meas.compressed()
+            UnbinnedLLH.__init__(
+                self, model, np.ma.masked_where(n_meas.mask, x), start)
+        elif np.ma.isMaskedArray(x):
+            self.n_meas = np.ma.masked_where(x.mask, n_meas).compressed()
+            UnbinnedLLH.__init__(self, model, x, start)
+        else:
+            self.n_meas = n_meas
+            UnbinnedLLH.__init__(self, model, x, start)
+
+    def likelihood(self, *params):
+        """
+        Dummy function for the likelihood calculation.
+        Implement your own, if there is no fitting implementation
+        """
+        pass
 
 
 class ChiSquare(LLHFit):
@@ -77,6 +135,17 @@ class BinomialFit(LLHFit):
                                np.zeros_like(q))
         likelihood += np.where(self.p_meas == 1, np.log(p), np.zeros_like(p))
         return -2 * self.N * likelihood.sum()
+
+
+class GeneralLLHFit(LLHFit):
+    def __init__(self, model, x, n_meas, start, distribution, *args):
+        self.distribution = lambda measurement, model: distribution(
+            measurement, model, *args)
+        LLHFit.__init__(self, model, x, n_meas, start)
+
+    def likelihood(self, *params):
+        n_model = self.model(self.x, *params)
+        return -2*np.log(self.distribution(self.n_meas, n_model)).sum()
 
 
 def install():
