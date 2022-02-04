@@ -32,6 +32,7 @@ class UnbinnedLLH():
         """
         self.m = imin.Minuit(self.likelihood, **self.par0,
                              name=self.par0.keys())
+        self.m.print_level = int(verbose)*2
         self.m.migrad()
         self.m.hesse()
         return self.m
@@ -92,12 +93,25 @@ class LLHFit(UnbinnedLLH):
         pass
 
     def goodness_of_fit(self):
-        n_meas = self.n_meas
-        self.asimov = self.model(self.x, self.m.values)
-        self.n_meas = self.asimov
-        asimov_likelihood = self.likelihood(self.m.values)
-        self.n_meas = n_meas
-        return 2*(asimov_likelihood-self.m.fval)
+        try:
+            p_meas = self.p_meas
+            self.asimov = self.model(self.x, *self.m.values)
+            self.p_meas = self.asimov
+            safe = self.llhvals
+            print(self.llhvals)
+            asimov_likelihood = self.likelihood(*self.m.values)
+            print(self.llhvals)
+            print(safe-self.llhvals)
+            self.p_meas = p_meas
+        except NameError:
+            print(self.m.values)
+            n_meas = self.n_meas
+            self.asimov = self.model(self.x, *self.m.values)
+            self.n_meas = self.asimov
+            asimov_likelihood = self.likelihood(*self.m.values)
+            self.n_meas = n_meas
+
+        return (asimov_likelihood-self.m.fval)
 
 
 class ChiSquare(LLHFit):
@@ -128,7 +142,10 @@ class PearsonChi2Fit(LLHFit):
 class PoissonFit(LLHFit):
     def likelihood(self, *params):
         n_pred = self.model(self.x, *params)
-        return -2*np.sum(self.n_meas*np.log(n_pred) - n_pred)
+        return -2*self.__likelihood(n_pred).sum()
+
+    def __likelihood(self, n_pred):
+        return self.n_meas*np.log(n_pred) - n_pred
 
 
 class BinomialFit(LLHFit):
@@ -139,7 +156,16 @@ class BinomialFit(LLHFit):
 
     def likelihood(self, *params):
         p = self.model(self.x, *params)
-        q = 1 - p
+        likelihood = self.__likelihood(p)
+        return -2 * self.N * likelihood.sum()
+
+    def goodness_of_fit(self):
+        L = self.m.fval
+        L_exp = -2*self.N * self.__likelihood(self.p_meas).sum()
+        return(L-L_exp)
+
+    def __likelihood(self, p):
+        q = 1-p
         likelihood = np.zeros_like(p)
         likelihood += np.where(
             (self.p_meas != 0) & (self.p_meas != 1),
@@ -148,7 +174,7 @@ class BinomialFit(LLHFit):
         likelihood += np.where(self.p_meas == 0, np.log(q),
                                np.zeros_like(q))
         likelihood += np.where(self.p_meas == 1, np.log(p), np.zeros_like(p))
-        return -2 * self.N * likelihood.sum()
+        return(likelihood)
 
 
 class GeneralLLHFit(LLHFit):
@@ -159,7 +185,13 @@ class GeneralLLHFit(LLHFit):
 
     def likelihood(self, *params):
         n_model = self.model(self.x, *params)
-        return -2*np.log(self.distribution(self.n_meas, n_model)).sum()
+        return -2*__likelihood(n_model).sum()
+
+    def __likelihood(self, n_model):
+        return np.log(self.distribution(self.n_meas, n_model))
+
+    def goodness_of_fit(self):
+        return 2*(self.__likelihood(self.n_meas).sum()-self.m.fval)
 
 
 def install():
@@ -169,7 +201,7 @@ def install():
             destination = path
             break
 
-    system('cp ./fit.py {destination}')
+    system(f'cp ./fit.py {destination}')
 
 
 if __name__ == "__main__":
