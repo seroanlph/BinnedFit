@@ -1,2 +1,2 @@
-# BinnedFit
-A small library for binned likelihood/chi-square fitting, so that I don't have to implement everything everytime from scratch again
+# FitWrapper
+A small library for (un-)binned likelihood/chi-square fitting, so that I don't have to implement everything everytime from scratch again
